@@ -10,6 +10,13 @@
 - **定时提醒** — 每 N 分钟弹出置顶提醒窗口
 - **可配置** — 通过托盘菜单调整提醒间隔
 
+## 📸 截图
+
+| 喝水提醒弹窗 | 设置面板 |
+|:---:|:---:|
+| ![喝水提醒](screenshots/reminder.png) | ![设置面板](screenshots/settings.png) |
+| 定时弹出提醒窗口 | 自定义提醒间隔（1–120 分钟） |
+
 ## 编译
 
 依赖：`libx11-dev` `libxft-dev` `libdbus-1-dev` `libpng-dev`
