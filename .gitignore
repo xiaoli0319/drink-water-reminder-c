@@ -1,0 +1,11 @@
+# Build output
+drink-reminder
+
+# Debian packaging
+drink-reminder_1.0-1_amd64/
+*.deb
+
+# Temp / backup files
+*~
+*.bak
+*.swp
