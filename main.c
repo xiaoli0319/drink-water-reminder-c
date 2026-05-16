@@ -121,12 +121,12 @@ static const unsigned char icon_bits[IH][3] = {
     {0,0,0},{0,0,0},{0,0,0},
 };
 
-static const char *S_TITLE = "\xe8\xaf\xa5\xe5\x96\x9d\xe6\xb0\xb4\xe5\x95\xa6\xef\xbc\x81";
-static const char *S_CONF_TITLE = "\xe5\x96\x9d\xe6\xb0\xb4\xe6\x8f\x90\xe9\x86\x92 \xc2\xb7 \xe8\xae\xbe\xe7\xbd\xae";
-static const char *S_OK = "\xe7\x9f\xa5\xe9\x81\x93\xe4\xba\x86";
-static const char *S_SAVE = "\xe4\xbf\x9d\xe5\xad\x98";
-static const char *S_CANCEL = "\xe5\x8f\x96\xe6\xb6\x88";
-static const char *S_LABEL = "\xe6\x8f\x90\xe9\x86\x92\xe9\x97\xb4\xe9\x9a\x94\xef\xbc\x88\xe5\x88\x86\xe9\x92\x9f\xef\xbc\x89";
+static const char *S_TITLE = "该喝水啦！";
+static const char *S_CONF_TITLE = "喝水提醒 · 设置";
+static const char *S_OK = "知道了";
+static const char *S_SAVE = "保存";
+static const char *S_CANCEL = "取消";
+static const char *S_LABEL = "提醒间隔（分钟）";
 
 static void show_reminder(void);
 static void hide_reminder(void);
@@ -425,7 +425,7 @@ static void tray_init_sni(void) {
 #define M_H 115
 #define M_IH 35
 #define M_N 3
-static const char *m_lbl[M_N] = {"\xe7\xab\x8b\xe5\x8d\xb3\xe6\x8f\x90\xe9\x86\x92","\xe8\xae\xbe\xe7\xbd\xae","\xe9\x80\x80\xe5\x87\xba"};
+static const char *m_lbl[M_N] = {"立即提醒","设置","退出"};
 
 static void draw_menu(void) {
     GC g=XCreateGC(dpy,menu_win,0,NULL);
@@ -435,8 +435,8 @@ static void draw_menu(void) {
         int y=2+i*M_IH;
         if (menu_active_idx==i) {
             XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,menu_win,g,2,y,M_W-4,M_IH-4);
-            draw_t(menu_win,fn,&xc_white,10,y+8,m_lbl[i]);
-        } else draw_t(menu_win,fn,&xc_text,10,y+8,m_lbl[i]);
+            draw_t(menu_win,fn,&xc_white,10,y+(M_IH-fn->ascent-fn->descent)/2,m_lbl[i]);
+        } else draw_t(menu_win,fn,&xc_text,10,y+(M_IH-fn->ascent-fn->descent)/2,m_lbl[i]);
         if (i<M_N-1) { XSetForeground(dpy,g,0xeeeeee); XDrawLine(dpy,menu_win,g,5,y+M_IH,M_W-5,y+M_IH); }
     }
     XFreeGC(dpy,g);
@@ -490,11 +490,11 @@ static void draw_reminder(void) {
             if (icon_bits[y][x]&(1<<(7-b))) { int px=ix+x*8+b, py=15+y; XDrawPoint(dpy,reminder_win,g,px,py); }
     }
     draw_t(reminder_win,ft,&xc_text,(R_W-tw(ft,S_TITLE))/2,50,S_TITLE);
-    char tip[128]; snprintf(tip,128,"\xe6\xaf\x8f\xe9\x9a\x94 %d \xe5\x88\x86\xe9\x92\x9f\xe6\x8f\x90\xe9\x86\x92\xe4\xb8\x80\xe6\xac\xa1 \xc2\xb7 \xe4\xbf\x9d\xe6\x8c\x81\xe5\x81\xa5\xe5\xba\xb7", interval);
+    char tip[128]; snprintf(tip,128,"每隔 %d 分钟提醒一次 · 保持健康", interval);
     draw_t(reminder_win,fs,&xc_tip,(R_W-tw(fs,tip))/2,80,tip);
     int bw=120,bh=34,bx=(R_W-bw)/2,by=R_H-bh-20;
     XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,reminder_win,g,bx,by,bw,bh);
-    draw_t(reminder_win,fn,&xc_white,(R_W-tw(fn,S_OK))/2,by+10,S_OK);
+    draw_t(reminder_win,fn,&xc_white,(R_W-tw(fn,S_OK))/2,by+(bh-fn->ascent-fn->descent)/2,S_OK);
     XFreeGC(dpy,g);
 }
 static void show_reminder(void) {
@@ -518,17 +518,17 @@ static void draw_config(void) {
     XSetForeground(dpy,g,p_white); XFillRectangle(dpy,config_win,g,0,0,C_W,C_H);
     draw_t(config_win,ft,&xc_text,(C_W-tw(ft,S_CONF_TITLE))/2,25,S_CONF_TITLE);
     draw_t(config_win,fn,&xc_text,30,60,S_LABEL);
-    XSetForeground(dpy,g,p_white); XFillRectangle(dpy,config_win,g,30,80,240,32);
+    XSetForeground(dpy,g,p_white); XFillRectangle(dpy,config_win,g,30,88,240,32);
     XSetForeground(dpy,g,config_focus?0x2196F3:0xcccccc);
-    XDrawRectangle(dpy,config_win,g,30,80,240,32);
+    XDrawRectangle(dpy,config_win,g,30,88,240,32);
     char d[16]=""; if (input_len>0) strcpy(d,input_buf); else if (config_focus==1) d[0]='|',d[1]=0;
-    draw_t(config_win,fn,&xc_text,38,80+(32-fn->ascent-fn->descent)/2+fn->ascent,d);
+    draw_t(config_win,fn,&xc_text,38,88+(32-fn->ascent-fn->descent)/2,d);
     int bw=(240-10)/2,bh=34,by=C_H-bh-20;
     XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,config_win,g,30,by,bw,bh);
-    draw_t(config_win,fn,&xc_white,30+(bw-tw(fn,S_SAVE))/2,by+10,S_SAVE);
+    draw_t(config_win,fn,&xc_white,30+(bw-tw(fn,S_SAVE))/2,by+(bh-fn->ascent-fn->descent)/2,S_SAVE);
     XSetForeground(dpy,g,0xeeeeee); XFillRectangle(dpy,config_win,g,30+bw+10,by,bw,bh);
     XSetForeground(dpy,g,0xcccccc); XDrawRectangle(dpy,config_win,g,30+bw+10,by,bw,bh);
-    draw_t(config_win,fn,&xc_text,30+bw+10+(bw-tw(fn,S_CANCEL))/2,by+10,S_CANCEL);
+    draw_t(config_win,fn,&xc_text,30+bw+10+(bw-tw(fn,S_CANCEL))/2,by+(bh-fn->ascent-fn->descent)/2,S_CANCEL);
     XFreeGC(dpy,g);
 }
 static void show_config(void) {
@@ -558,7 +558,7 @@ static void h_config_click(int x, int y) {
     int bw=(240-10)/2,bh=34,by=C_H-bh-20;
     if (x>=30&&x<=30+bw&&y>=by&&y<=by+bh) { config_save(); return; }
     if (x>=30+bw+10&&x<=30+bw+10+bw&&y>=by&&y<=by+bh) { hide_config(); return; }
-    config_focus=(x>=30&&x<=270&&y>=80&&y<=112)?1:0; draw_config();
+    config_focus=(x>=30&&x<=270&&y>=88&&y<=120)?1:0; draw_config();
 }
 static void handle_expose(XExposeEvent *e) {
     if (e->window==menu_win) draw_menu();
