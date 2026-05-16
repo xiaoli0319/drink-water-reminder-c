@@ -1,9 +1,10 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
+#include <X11/Xft/Xft.h>
 #include <X11/cursorfont.h>
 #include <dbus/dbus.h>
-#include <locale.h>
+#include <png.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -45,20 +46,71 @@ static Atom net_wm_type;
 static Atom net_wm_dialog;
 static Atom net_active_window;
 
-// Font sets
-static XFontSet fs_n = NULL, fs_t = NULL, fs_s = NULL;
-static int na, nd, ta, td, sa, sd;
+// Xft fonts & colors
+static XftFont *fn, *ft, *fs;
+static XftColor xc_text, xc_white, xc_blue, xc_tip;
+static unsigned long p_black, p_white, p_blue, p_tip;
 
-// Colors
-static unsigned long p_black, p_white, p_blue, p_tip, p_bg;
-
-// Paths / config
 static char config_path[512], pid_path[512], autostart_path[1024], autostart_dir[512];
-
-// DBus SNI tray
 static DBusConnection *dbus_conn = NULL;
 
-// --- Water drop icon (24x24 bitmap, used in reminder window) ---
+// --- Image (loaded from water.png) ---
+typedef struct { int w, h; unsigned char *pixels; } Image;
+static Image app_img = {0,0,NULL};
+
+static Image load_png(const char *path) {
+    Image img = {0,0,NULL};
+    FILE *f = fopen(path,"rb"); if (!f) return img;
+    unsigned char sig[8]; fread(sig,1,8,f);
+    if (png_sig_cmp(sig,0,8)) { fclose(f); return img; }
+    png_structp p = png_create_read_struct(PNG_LIBPNG_VER_STRING,NULL,NULL,NULL);
+    if (!p) { fclose(f); return img; }
+    png_infop inf = png_create_info_struct(p);
+    if (!inf) { png_destroy_read_struct(&p,NULL,NULL); fclose(f); return img; }
+    if (setjmp(png_jmpbuf(p))) { png_destroy_read_struct(&p,&inf,NULL); fclose(f); return img; }
+    png_init_io(p,f); png_set_sig_bytes(p,8); png_read_info(p,inf);
+    img.w = png_get_image_width(p,inf); img.h = png_get_image_height(p,inf);
+    png_byte ct=png_get_color_type(p,inf), bd=png_get_bit_depth(p,inf);
+    if (bd==16) png_set_strip_16(p);
+    if (ct==PNG_COLOR_TYPE_PALETTE) png_set_palette_to_rgb(p);
+    if (ct==PNG_COLOR_TYPE_GRAY&&bd<8) png_set_expand_gray_1_2_4_to_8(p);
+    if (png_get_valid(p,inf,PNG_INFO_tRNS)) png_set_tRNS_to_alpha(p);
+    if (ct==PNG_COLOR_TYPE_RGB||ct==PNG_COLOR_TYPE_GRAY||ct==PNG_COLOR_TYPE_PALETTE) png_set_filler(p,0xFF,PNG_FILLER_AFTER);
+    if (ct==PNG_COLOR_TYPE_GRAY||ct==PNG_COLOR_TYPE_GRAY_ALPHA) png_set_gray_to_rgb(p);
+    png_read_update_info(p,inf);
+    img.pixels = malloc(img.w*img.h*4);
+    png_bytep *rows = malloc(sizeof(png_bytep)*img.h);
+    for (int y=0;y<img.h;y++) rows[y]=img.pixels+y*img.w*4;
+    png_read_image(p,rows); free(rows);
+    png_destroy_read_struct(&p,&inf,NULL); fclose(f);
+    return img;
+}
+
+static Image scale_img(Image *s, int nw, int nh) {
+    Image d = {nw,nh,NULL}; d.pixels = malloc(nw*nh*4);
+    for (int y=0;y<nh;y++) for (int x=0;x<nw;x++) {
+        int sx=x*s->w/nw, sy=y*s->h/nh;
+        if (sx>=s->w) sx=s->w-1; if (sy>=s->h) sy=s->h-1;
+        memcpy(d.pixels+(y*nw+x)*4, s->pixels+(sy*s->w+sx)*4, 4);
+    }
+    return d;
+}
+
+static void set_net_icon(Window w, Image *img) {
+    if (!img->pixels) return;
+    int n = img->w * img->h;
+    unsigned long *data = malloc(sizeof(unsigned long)*(n+2));
+    data[0]=img->w; data[1]=img->h;
+    for (int i=0;i<n;i++) {
+        unsigned char *p = img->pixels + i*4;
+        data[i+2] = ((unsigned long)p[3]<<24)|(p[0]<<16)|(p[1]<<8)|p[2];
+    }
+    Atom a = XInternAtom(dpy,"_NET_WM_ICON",False);
+    XChangeProperty(dpy,w,a,XA_CARDINAL,32,PropModeReplace,(unsigned char*)data,n+2);
+    free(data);
+}
+
+// --- Water drop icon (fallback when PNG not found) ---
 #define IW 24
 #define IH 24
 static const unsigned char icon_bits[IH][3] = {
@@ -69,7 +121,6 @@ static const unsigned char icon_bits[IH][3] = {
     {0,0,0},{0,0,0},{0,0,0},
 };
 
-// --- UTF-8 strings ---
 static const char *S_TITLE = "\xe8\xaf\xa5\xe5\x96\x9d\xe6\xb0\xb4\xe5\x95\xa6\xef\xbc\x81";
 static const char *S_CONF_TITLE = "\xe5\x96\x9d\xe6\xb0\xb4\xe6\x8f\x90\xe9\x86\x92 \xc2\xb7 \xe8\xae\xbe\xe7\xbd\xae";
 static const char *S_OK = "\xe7\x9f\xa5\xe9\x81\x93\xe4\xba\x86";
@@ -77,7 +128,6 @@ static const char *S_SAVE = "\xe4\xbf\x9d\xe5\xad\x98";
 static const char *S_CANCEL = "\xe5\x8f\x96\xe6\xb6\x88";
 static const char *S_LABEL = "\xe6\x8f\x90\xe9\x86\x92\xe9\x97\xb4\xe9\x9a\x94\xef\xbc\x88\xe5\x88\x86\xe9\x92\x9f\xef\xbc\x89";
 
-// --- Forward declarations ---
 static void show_reminder(void);
 static void hide_reminder(void);
 static void show_config(void);
@@ -119,49 +169,43 @@ static void setup_autostart(void) {
     fclose(f);
 }
 
-// ====== Colors & Fonts ======
-static unsigned long alloc_color(const char *n) {
-    XColor c; Colormap cm=DefaultColormap(dpy,scr);
-    XParseColor(dpy,cm,n,&c); XAllocColor(dpy,cm,&c); return c.pixel;
-}
+// ====== Colors & Fonts (Xft) ======
 static void init_colors(void) {
-    p_black=BlackPixel(dpy,scr); p_white=WhitePixel(dpy,scr);
-    p_blue=alloc_color("#2196F3"); p_tip=alloc_color("#999999"); p_bg=alloc_color("#f5f5f5");
-}
-static XFontSet try_fs(const char *pat) {
-    setlocale(LC_ALL,""); char **ml; int n; char *ds;
-    XFontSet fs = XCreateFontSet(dpy, pat, &ml, &n, &ds);
-    if (ml) XFreeStringList(ml); return fs;
-}
-static int fs_asc(XFontSet fs) {
-    XFontStruct **xfs; char **names; int n, a=0;
-    XExtentsOfFontSet(fs); n=XFontsOfFontSet(fs,&xfs,&names);
-    for (int i=0;i<n;i++) if (xfs[i]->ascent>a) a=xfs[i]->ascent; return a;
-}
-static int fs_des(XFontSet fs) {
-    XFontStruct **xfs; char **names; int n, d=0;
-    n=XFontsOfFontSet(fs,&xfs,&names);
-    for (int i=0;i<n;i++) if (xfs[i]->descent>d) d=xfs[i]->descent; return d;
+    Visual *v = DefaultVisual(dpy, scr);
+    Colormap cm = DefaultColormap(dpy, scr);
+    p_black = BlackPixel(dpy, scr); p_white = WhitePixel(dpy, scr);
+    XftColorAllocName(dpy, v, cm, "#333333", &xc_text);
+    XftColorAllocName(dpy, v, cm, "#ffffff", &xc_white);
+    XftColorAllocName(dpy, v, cm, "#2196F3", &xc_blue);
+    XftColorAllocName(dpy, v, cm, "#999999", &xc_tip);
+    // pixel colors for GC drawing (blue, tip)
+    {
+        XColor c;
+        XParseColor(dpy,cm,"#2196F3",&c); XAllocColor(dpy,cm,&c); p_blue = c.pixel;
+        XParseColor(dpy,cm,"#999999",&c); XAllocColor(dpy,cm,&c); p_tip = c.pixel;
+    }
 }
 static void init_fonts(void) {
-    fs_n = try_fs("-*-*-*-*-*-*-14-*-*-*-*-*-iso10646-1");
-    if (!fs_n) fs_n = try_fs("-*-*-medium-r-*-*-14-*-*-*-*-*-*-*");
-    if (!fs_n) fs_n = try_fs("fixed");
-    fs_t = try_fs("-*-*-bold-r-*-*-16-*-*-*-*-*-iso10646-1");
-    if (!fs_t) fs_t = try_fs("-*-*-bold-r-*-*-16-*-*-*-*-*-*-*");
-    if (!fs_t) fs_t = fs_n;
-    fs_s = try_fs("-*-*-*-*-*-*-12-*-*-*-*-*-iso10646-1");
-    if (!fs_s) fs_s = try_fs("-*-*-medium-r-*-*-12-*-*-*-*-*-*-*");
-    if (!fs_s) fs_s = fs_n;
-    na=fs_asc(fs_n); nd=fs_des(fs_n); ta=fs_asc(fs_t); td=fs_des(fs_t); sa=fs_asc(fs_s); sd=fs_des(fs_s);
+    fn = XftFontOpenName(dpy, scr, "sans-serif:size=13");
+    if (!fn) fn = XftFontOpenName(dpy, scr, "fixed:size=13");
+    ft = XftFontOpenName(dpy, scr, "sans-serif:size=16:bold");
+    if (!ft) ft = XftFontOpenName(dpy, scr, "sans-serif:size=16");
+    if (!ft) ft = fn;
+    fs = XftFontOpenName(dpy, scr, "sans-serif:size=11");
+    if (!fs) fs = XftFontOpenName(dpy, scr, "fixed:size=11");
+    if (!fs) fs = fn;
 }
-static GC t_gc = NULL;
-static void ensure_gc(Window w) { if (!t_gc) t_gc = XCreateGC(dpy,w,0,NULL); }
-static void draw_utf8(Window w, XFontSet fs, int x, int y, int asc, const char *s, unsigned long clr) {
-    ensure_gc(w); XSetForeground(dpy,t_gc,clr); Xutf8DrawString(dpy,w,fs,t_gc,x,y+asc,s,strlen(s));
+
+// ====== Xft text drawing helpers ======
+static void draw_t(Window w, XftFont *f, XftColor *c, int x, int y, const char *s) {
+    XftDraw *xd = XftDrawCreate(dpy, w, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
+    XftDrawStringUtf8(xd, c, f, x, y + f->ascent, (const unsigned char *)s, strlen(s));
+    XftDrawDestroy(xd);
 }
-static int text_w(XFontSet fs, const char *s) {
-    XRectangle ink, log; Xutf8TextExtents(fs,s,strlen(s),&ink,&log); return log.width;
+static int tw(XftFont *f, const char *s) {
+    XGlyphInfo gi;
+    XftTextExtentsUtf8(dpy, f, (const unsigned char *)s, strlen(s), &gi);
+    return gi.xOff;
 }
 
 // ====== Window helpers ======
@@ -181,10 +225,10 @@ static void set_type(Window w, Atom t) {
 static void set_del(Window w) { XSetWMProtocols(dpy,w,&wm_delete_window,1); }
 static Window mkwin(int W, int H, int over) {
     XSetWindowAttributes a;
-    a.background_pixel=p_white;
-    a.event_mask=ExposureMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|KeyPressMask|StructureNotifyMask;
-    a.override_redirect=over?True:False;
-    unsigned long m=CWBackPixel|CWEventMask; if (over) m|=CWOverrideRedirect;
+    a.background_pixel = p_white;
+    a.event_mask = ExposureMask|ButtonPressMask|ButtonReleaseMask|PointerMotionMask|KeyPressMask|StructureNotifyMask;
+    a.override_redirect = over?True:False;
+    unsigned long m = CWBackPixel|CWEventMask; if (over) m|=CWOverrideRedirect;
     return XCreateWindow(dpy,DefaultRootWindow(dpy),0,0,W,H,0,CopyFromParent,InputOutput,CopyFromParent,m,&a);
 }
 static void activate_win(Window w) {
@@ -194,31 +238,33 @@ static void activate_win(Window w) {
     XSendEvent(dpy,DefaultRootWindow(dpy),False,SubstructureRedirectMask|SubstructureNotifyMask,&e);
     XRaiseWindow(dpy,w); XSync(dpy,False); XSetInputFocus(dpy,w,RevertToPointerRoot,CurrentTime);
 }
+static int xerr_handler(Display *d, XErrorEvent *e) { return 0; }
 
-// ====== DBus StatusNotifierItem Tray ======
+// ====== DBus SNI ======
 static volatile int dbus_remind = 0;
-static volatile int dbus_config = 0;
 static volatile int dbus_menu = 0;
-static void append_icon_pixmap(DBusMessageIter *iter) {
-    int w=IW, h=IH, stride=w*4;
-    unsigned char *pix = malloc(stride * h);
-    for (int y=0; y<h; y++)
-        for (int x=0; x<w; x++) {
-            int bi=x/8, bj=7-(x%8);
-            int on = (y<h-2 && bi<3) ? ((icon_bits[y][bi]>>bj)&1) : 0;
-            int idx = (y*w+x)*4;
-            if (on) { pix[idx+0]=0xFF; pix[idx+1]=0x99; pix[idx+2]=0x33; pix[idx+3]=0xFF; }
-            else    { pix[idx+0]=0;    pix[idx+1]=0;    pix[idx+2]=0;    pix[idx+3]=0;    }
-        }
 
-    // a(iiay)
+static void append_icon_pixmap(DBusMessageIter *iter) {
+    int w=IW, h=IH;
+    unsigned char *pix = NULL;
+    if (app_img.pixels) {
+        Image sm = scale_img(&app_img, w, h);
+        pix = sm.pixels;
+    } else {
+        pix = malloc(w*h*4);
+        for (int y=0; y<h; y++) for (int x=0; x<w; x++) {
+            int bi=x/8, bj=7-(x%8), on=(y<h-2&&bi<3)?((icon_bits[y][bi]>>bj)&1):0, i=(y*w+x)*4;
+            if (on) { pix[i+0]=0xFF; pix[i+1]=0x99; pix[i+2]=0x33; pix[i+3]=0xFF; }
+            else    { pix[i+0]=0;    pix[i+1]=0;    pix[i+2]=0;    pix[i+3]=0;    }
+        }
+    }
     DBusMessageIter arr, st, ba;
     dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY, "(iiay)", &arr);
     dbus_message_iter_open_container(&arr, DBUS_TYPE_STRUCT, NULL, &st);
     dbus_message_iter_append_basic(&st, DBUS_TYPE_INT32, &w);
     dbus_message_iter_append_basic(&st, DBUS_TYPE_INT32, &h);
     dbus_message_iter_open_container(&st, DBUS_TYPE_ARRAY, "y", &ba);
-    dbus_message_iter_append_fixed_array(&ba, DBUS_TYPE_BYTE, &pix, stride * h);
+    for (int i=0; i<w*h*4; i++) dbus_message_iter_append_basic(&ba, DBUS_TYPE_BYTE, &pix[i]);
     dbus_message_iter_close_container(&st, &ba);
     dbus_message_iter_close_container(&arr, &st);
     dbus_message_iter_close_container(iter, &arr);
@@ -257,41 +303,15 @@ static int dbus_append_prop(DBusMessageIter *iter, const char *name) {
         dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "b", &v);
         dbus_message_iter_append_basic(&v, DBUS_TYPE_BOOLEAN, &val);
         dbus_message_iter_close_container(iter, &v);
-    } else if (!strcmp(name,"IconName")) {
-        const char *val="";
-        dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "s", &v);
-        dbus_message_iter_append_basic(&v, DBUS_TYPE_STRING, &val);
-        dbus_message_iter_close_container(iter, &v);
     } else if (!strcmp(name,"Menu")) {
         const char *val="";
         dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "s", &v);
         dbus_message_iter_append_basic(&v, DBUS_TYPE_STRING, &val);
         dbus_message_iter_close_container(iter, &v);
     } else if (!strcmp(name,"IconPixmap")) {
-        // a(iiay): array of {int32 width, int32 height, array of byte ARGB32}
-        int w=IW, h=IH, n=w*h*4;
-        unsigned char *pix = malloc(n);
-        for (int y=0; y<h; y++)
-            for (int x=0; x<w; x++) {
-                int bi=x/8, bj=7-(x%8);
-                int on = (y<h-2 && bi<3) ? ((icon_bits[y][bi]>>bj)&1) : 0;
-                int i=(y*w+x)*4;
-                if (on) { pix[i+0]=0xFF; pix[i+1]=0x99; pix[i+2]=0x33; pix[i+3]=0xFF; }
-                else    { pix[i+0]=0;    pix[i+1]=0;    pix[i+2]=0;    pix[i+3]=0;    }
-            }
         dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "a(iiay)", &v);
-        DBusMessageIter arr, st, ba;
-        dbus_message_iter_open_container(&v, DBUS_TYPE_ARRAY, "(iiay)", &arr);
-        dbus_message_iter_open_container(&arr, DBUS_TYPE_STRUCT, NULL, &st);
-        dbus_message_iter_append_basic(&st, DBUS_TYPE_INT32, &w);
-        dbus_message_iter_append_basic(&st, DBUS_TYPE_INT32, &h);
-        dbus_message_iter_open_container(&st, DBUS_TYPE_ARRAY, "y", &ba);
-        for (int i=0; i<n; i++) dbus_message_iter_append_basic(&ba, DBUS_TYPE_BYTE, &pix[i]);
-        dbus_message_iter_close_container(&st, &ba);
-        dbus_message_iter_close_container(&arr, &st);
-        dbus_message_iter_close_container(&v, &arr);
+        append_icon_pixmap(&v);
         dbus_message_iter_close_container(iter, &v);
-        free(pix);
     } else return 0;
     return 1;
 }
@@ -389,7 +409,6 @@ static void tray_init_sni(void) {
     if (!dbus_connection_register_object_path(dbus_conn, "/StatusNotifierItem", &tray_vtable, NULL)) {
         dbus_connection_unref(dbus_conn); dbus_conn=NULL; return;
     }
-    // Register with watcher (fire-and-forget, may not be running yet)
     const char *name = dbus_bus_get_unique_name(dbus_conn);
     DBusMessage *msg = dbus_message_new_method_call("org.kde.StatusNotifierWatcher",
         "/StatusNotifierWatcher","org.kde.StatusNotifierWatcher","RegisterStatusNotifierItem");
@@ -399,7 +418,6 @@ static void tray_init_sni(void) {
         dbus_connection_flush(dbus_conn);
         dbus_message_unref(msg);
     }
-    fprintf(stderr, "[sni] tray registered\n");
 }
 
 // ====== Menu ======
@@ -417,8 +435,8 @@ static void draw_menu(void) {
         int y=2+i*M_IH;
         if (menu_active_idx==i) {
             XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,menu_win,g,2,y,M_W-4,M_IH-4);
-            draw_utf8(menu_win,fs_n,10,y+8,na,m_lbl[i],p_white);
-        } else draw_utf8(menu_win,fs_n,10,y+8,na,m_lbl[i],p_black);
+            draw_t(menu_win,fn,&xc_white,10,y+8,m_lbl[i]);
+        } else draw_t(menu_win,fn,&xc_text,10,y+8,m_lbl[i]);
         if (i<M_N-1) { XSetForeground(dpy,g,0xeeeeee); XDrawLine(dpy,menu_win,g,5,y+M_IH,M_W-5,y+M_IH); }
     }
     XFreeGC(dpy,g);
@@ -456,15 +474,27 @@ static int m_hit(int x, int y) {
 static void draw_reminder(void) {
     GC g=XCreateGC(dpy,reminder_win,0,NULL);
     XSetForeground(dpy,g,p_white); XFillRectangle(dpy,reminder_win,g,0,0,R_W,R_H);
-    int ix=(R_W-IW)/2; XSetForeground(dpy,g,0x3399FF);
-    for (int y=0;y<IH-2;y++) for (int x=0;x<3;x++) for (int b=0;b<8;b++)
-        if (icon_bits[y][x]&(1<<(7-b))) { int px=ix+x*8+b, py=15+y; XDrawPoint(dpy,reminder_win,g,px,py); }
-    draw_utf8(reminder_win,fs_t,(R_W-text_w(fs_t,S_TITLE))/2,50,ta,S_TITLE,p_black);
+    // Draw icon (from water.png or fallback bitmap)
+    if (app_img.pixels) {
+        Image sm = scale_img(&app_img, 48, 48);
+        XImage *xi = XCreateImage(dpy,DefaultVisual(dpy,scr),32,ZPixmap,0,
+                                  (char*)sm.pixels,48,48,32,0);
+        int ix=(R_W-48)/2;
+        XPutImage(dpy,reminder_win,g,xi,0,0,ix,15,48,48);
+        xi->data = NULL;
+        XDestroyImage(xi);
+        free(sm.pixels);
+    } else {
+        int ix=(R_W-IW)/2; XSetForeground(dpy,g,0x3399FF);
+        for (int y=0;y<IH-2;y++) for (int x=0;x<3;x++) for (int b=0;b<8;b++)
+            if (icon_bits[y][x]&(1<<(7-b))) { int px=ix+x*8+b, py=15+y; XDrawPoint(dpy,reminder_win,g,px,py); }
+    }
+    draw_t(reminder_win,ft,&xc_text,(R_W-tw(ft,S_TITLE))/2,50,S_TITLE);
     char tip[128]; snprintf(tip,128,"\xe6\xaf\x8f\xe9\x9a\x94 %d \xe5\x88\x86\xe9\x92\x9f\xe6\x8f\x90\xe9\x86\x92\xe4\xb8\x80\xe6\xac\xa1 \xc2\xb7 \xe4\xbf\x9d\xe6\x8c\x81\xe5\x81\xa5\xe5\xba\xb7", interval);
-    draw_utf8(reminder_win,fs_s,(R_W-text_w(fs_s,tip))/2,80,sa,tip,p_tip);
+    draw_t(reminder_win,fs,&xc_tip,(R_W-tw(fs,tip))/2,80,tip);
     int bw=120,bh=34,bx=(R_W-bw)/2,by=R_H-bh-20;
     XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,reminder_win,g,bx,by,bw,bh);
-    draw_utf8(reminder_win,fs_n,(R_W-text_w(fs_n,S_OK))/2,by+10,na,S_OK,p_white);
+    draw_t(reminder_win,fn,&xc_white,(R_W-tw(fn,S_OK))/2,by+10,S_OK);
     XFreeGC(dpy,g);
 }
 static void show_reminder(void) {
@@ -472,6 +502,7 @@ static void show_reminder(void) {
     reminder_win=mkwin(R_W,R_H,0); set_above(reminder_win); set_skip(reminder_win);
     set_type(reminder_win,net_wm_dialog); set_del(reminder_win);
     center_win(reminder_win,R_W,R_H); XMapWindow(dpy,reminder_win); XFlush(dpy);
+    set_net_icon(reminder_win, &app_img);
     activate_win(reminder_win); draw_reminder();
     last_reminder=time(NULL);
 }
@@ -485,19 +516,19 @@ static void hide_reminder(void) {
 static void draw_config(void) {
     GC g=XCreateGC(dpy,config_win,0,NULL);
     XSetForeground(dpy,g,p_white); XFillRectangle(dpy,config_win,g,0,0,C_W,C_H);
-    draw_utf8(config_win,fs_t,(C_W-text_w(fs_t,S_CONF_TITLE))/2,25,ta,S_CONF_TITLE,p_black);
-    draw_utf8(config_win,fs_n,30,60,na,S_LABEL,p_black);
+    draw_t(config_win,ft,&xc_text,(C_W-tw(ft,S_CONF_TITLE))/2,25,S_CONF_TITLE);
+    draw_t(config_win,fn,&xc_text,30,60,S_LABEL);
     XSetForeground(dpy,g,p_white); XFillRectangle(dpy,config_win,g,30,80,240,32);
     XSetForeground(dpy,g,config_focus?0x2196F3:0xcccccc);
     XDrawRectangle(dpy,config_win,g,30,80,240,32);
     char d[16]=""; if (input_len>0) strcpy(d,input_buf); else if (config_focus==1) d[0]='|',d[1]=0;
-    draw_utf8(config_win,fs_n,38,80+(32-na-nd)/2+na,na,d,p_black);
+    draw_t(config_win,fn,&xc_text,38,80+(32-fn->ascent-fn->descent)/2+fn->ascent,d);
     int bw=(240-10)/2,bh=34,by=C_H-bh-20;
     XSetForeground(dpy,g,p_blue); XFillRectangle(dpy,config_win,g,30,by,bw,bh);
-    draw_utf8(config_win,fs_n,30+(bw-text_w(fs_n,S_SAVE))/2,by+10,na,S_SAVE,p_white);
+    draw_t(config_win,fn,&xc_white,30+(bw-tw(fn,S_SAVE))/2,by+10,S_SAVE);
     XSetForeground(dpy,g,0xeeeeee); XFillRectangle(dpy,config_win,g,30+bw+10,by,bw,bh);
     XSetForeground(dpy,g,0xcccccc); XDrawRectangle(dpy,config_win,g,30+bw+10,by,bw,bh);
-    draw_utf8(config_win,fs_n,30+bw+10+(bw-text_w(fs_n,S_CANCEL))/2,by+10,na,S_CANCEL,p_black);
+    draw_t(config_win,fn,&xc_text,30+bw+10+(bw-tw(fn,S_CANCEL))/2,by+10,S_CANCEL);
     XFreeGC(dpy,g);
 }
 static void show_config(void) {
@@ -505,6 +536,7 @@ static void show_config(void) {
     snprintf(input_buf,8,"%d",interval); input_len=strlen(input_buf); config_focus=1;
     config_win=mkwin(C_W,C_H,0); set_type(config_win,net_wm_dialog); set_del(config_win);
     center_win(config_win,C_W,C_H); XMapWindow(dpy,config_win); XFlush(dpy);
+    set_net_icon(config_win, &app_img);
     activate_win(config_win); draw_config();
 }
 static void hide_config(void) {
@@ -557,7 +589,7 @@ static void handle_key(XKeyEvent *e) {
         if (buf[0]>='0'&&buf[0]<='9'&&input_len<6) { input_buf[input_len++]=buf[0]; input_buf[input_len]=0; draw_config(); return; }
         return;
     }
-    if (e->window==reminder_win) { if (e->keycode) hide_reminder(); return; }
+    if (e->window==reminder_win) { return; }
     if (menu_win!=None) { KeySym ks; char b[8]; XLookupString(e,b,8,&ks,NULL); if (ks==XK_Escape) hide_menu(); return; }
 }
 static void handle_client(XClientMessageEvent *e) {
@@ -566,9 +598,6 @@ static void handle_client(XClientMessageEvent *e) {
     }
 }
 
-// ====== X Error handler (suppress BadMatch from SetInputFocus on Wayland) ======
-static int xerr_handler(Display *d, XErrorEvent *e) { return 0; }
-
 // ====== Signal ======
 static void on_signal(int sig) {
     if (sig==SIGUSR1) sig_remind=1; else if (sig==SIGINT||sig==SIGTERM) quit_flag=1;
@@ -576,14 +605,19 @@ static void on_signal(int sig) {
 
 // ====== Cleanup ======
 static void cleanup(void) {
+    if (app_img.pixels) { free(app_img.pixels); app_img.pixels=NULL; }
     if (menu_win!=None) XDestroyWindow(dpy,menu_win);
     if (reminder_win!=None) XDestroyWindow(dpy,reminder_win);
     if (config_win!=None) XDestroyWindow(dpy,config_win);
-    if (t_gc) XFreeGC(dpy,t_gc);
     if (dbus_conn) { dbus_connection_unref(dbus_conn); dbus_conn=NULL; }
-    if (fs_n&&fs_n!=fs_s) XFreeFontSet(dpy,fs_n);
-    if (fs_t&&fs_t!=fs_n) XFreeFontSet(dpy,fs_t);
-    if (fs_s&&fs_s!=fs_n) XFreeFontSet(dpy,fs_s);
+    if (fn) XftFontClose(dpy,fn);
+    if (ft&&ft!=fn) XftFontClose(dpy,ft);
+    if (fs&&fs!=fn) XftFontClose(dpy,fs);
+    {
+        Visual *v=DefaultVisual(dpy,scr); Colormap cm=DefaultColormap(dpy,scr);
+        XftColorFree(dpy,v,cm,&xc_text); XftColorFree(dpy,v,cm,&xc_white);
+        XftColorFree(dpy,v,cm,&xc_blue); XftColorFree(dpy,v,cm,&xc_tip);
+    }
     rm_pid(); if (dpy) XCloseDisplay(dpy);
 }
 
@@ -601,6 +635,9 @@ int main(int argc, char **argv) {
     if (!dpy) { fprintf(stderr,"Cannot open display\n"); return 1; }
     scr = DefaultScreen(dpy);
     init_colors(); init_fonts();
+    // Load app icon
+    app_img = load_png("water.png");
+    if (!app_img.pixels) app_img = load_png("/usr/share/icons/hicolor/256x256/apps/drink-reminder.png");
     wm_delete_window=XInternAtom(dpy,"WM_DELETE_WINDOW",False);
     net_wm_state=XInternAtom(dpy,"_NET_WM_STATE",False);
     net_wm_above=XInternAtom(dpy,"_NET_WM_STATE_ABOVE",False);
@@ -610,20 +647,15 @@ int main(int argc, char **argv) {
     net_active_window=XInternAtom(dpy,"_NET_ACTIVE_WINDOW",False);
     load_config(); setup_autostart();
     XSetErrorHandler(xerr_handler);
-
     tray_init_sni();
-
     last_reminder = time(NULL);
     show_reminder();
-
     while (!quit_flag) {
         if (sig_remind) { sig_remind=0; show_reminder(); }
         if (dbus_remind) { dbus_remind=0; show_reminder(); }
-        if (dbus_config) { dbus_config=0; show_config(); }
         if (dbus_menu) { dbus_menu=0; show_menu(); }
         time_t now = time(NULL);
         if (!reminder_win && (now-last_reminder)>=interval*60) show_reminder();
-
         while (XPending(dpy)>0) {
             XEvent ev; XNextEvent(dpy,&ev);
             switch (ev.type) {
@@ -634,12 +666,10 @@ int main(int argc, char **argv) {
                 case ClientMessage: handle_client(&ev.xclient); break;
             }
         }
-
         if (dbus_conn) {
             dbus_connection_read_write(dbus_conn, 0);
             while (dbus_connection_dispatch(dbus_conn) == DBUS_DISPATCH_DATA_REMAINS);
         }
-
         usleep(100000);
     }
     cleanup();
