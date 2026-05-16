@@ -46,7 +46,7 @@ static Atom net_wm_type;
 static Atom net_wm_dialog;
 static Atom net_active_window;
 
-// Xft fonts & colors
+// Xft 字体和颜色
 static XftFont *fn, *ft, *fs;
 static XftColor xc_text, xc_white, xc_blue, xc_tip;
 static unsigned long p_black, p_white, p_blue, p_tip;
@@ -54,7 +54,7 @@ static unsigned long p_black, p_white, p_blue, p_tip;
 static char config_path[512], pid_path[512], autostart_path[1024], autostart_dir[512];
 static DBusConnection *dbus_conn = NULL;
 
-// --- Image (loaded from water.png) ---
+// --- 图片（从 water.png 加载） ---
 typedef struct { int w, h; unsigned char *pixels; } Image;
 static Image app_img = {0,0,NULL};
 
@@ -110,7 +110,7 @@ static void set_net_icon(Window w, Image *img) {
     free(data);
 }
 
-// --- Water drop icon (fallback when PNG not found) ---
+// --- 水滴图标（未找到 PNG 格式图标时的备用图标） ---
 #define IW 24
 #define IH 24
 static const unsigned char icon_bits[IH][3] = {
@@ -135,7 +135,7 @@ static void hide_config(void);
 static void show_menu(void);
 static void hide_menu(void);
 
-// ====== Paths / Config / PID ======
+// ====== 路径 / 配置 / PID ======
 static void init_paths(void) {
     struct passwd *pw = getpwuid(getuid());
     char *h = pw ? pw->pw_dir : getenv("HOME");
@@ -169,7 +169,7 @@ static void setup_autostart(void) {
     fclose(f);
 }
 
-// ====== Colors & Fonts (Xft) ======
+// ====== 颜色和字体（Xft）======
 static void init_colors(void) {
     Visual *v = DefaultVisual(dpy, scr);
     Colormap cm = DefaultColormap(dpy, scr);
@@ -178,7 +178,7 @@ static void init_colors(void) {
     XftColorAllocName(dpy, v, cm, "#ffffff", &xc_white);
     XftColorAllocName(dpy, v, cm, "#2196F3", &xc_blue);
     XftColorAllocName(dpy, v, cm, "#999999", &xc_tip);
-    // pixel colors for GC drawing (blue, tip)
+    // GC 绘制用的像素颜色（蓝色、灰色）
     {
         XColor c;
         XParseColor(dpy,cm,"#2196F3",&c); XAllocColor(dpy,cm,&c); p_blue = c.pixel;
@@ -196,7 +196,7 @@ static void init_fonts(void) {
     if (!fs) fs = fn;
 }
 
-// ====== Xft text drawing helpers ======
+// ====== Xft 文字绘制辅助 ======
 static void draw_t(Window w, XftFont *f, XftColor *c, int x, int y, const char *s) {
     XftDraw *xd = XftDrawCreate(dpy, w, DefaultVisual(dpy, scr), DefaultColormap(dpy, scr));
     XftDrawStringUtf8(xd, c, f, x, y + f->ascent, (const unsigned char *)s, strlen(s));
@@ -208,7 +208,7 @@ static int tw(XftFont *f, const char *s) {
     return gi.xOff;
 }
 
-// ====== Window helpers ======
+// ====== 窗口辅助函数 ======
 static void center_win(Window w, int W, int H) {
     Screen *s = DefaultScreenOfDisplay(dpy);
     XMoveResizeWindow(dpy,w,(s->width-W)/2,(s->height-H)/2,W,H);
@@ -240,7 +240,7 @@ static void activate_win(Window w) {
 }
 static int xerr_handler(Display *d, XErrorEvent *e) { return 0; }
 
-// ====== DBus SNI ======
+// ====== DBus 状态通知项（托盘）======
 static volatile int dbus_remind = 0;
 static volatile int dbus_menu = 0;
 
@@ -420,7 +420,7 @@ static void tray_init_sni(void) {
     }
 }
 
-// ====== Menu ======
+// ====== 右键菜单 ======
 #define M_W 140
 #define M_H 115
 #define M_IH 35
@@ -468,13 +468,13 @@ static int m_hit(int x, int y) {
     int i=(y-2)/M_IH; return (i<0||i>=M_N)?-1:i;
 }
 
-// ====== Reminder ======
+// ====== 提醒窗口 ======
 #define R_W 340
 #define R_H 210
 static void draw_reminder(void) {
     GC g=XCreateGC(dpy,reminder_win,0,NULL);
     XSetForeground(dpy,g,p_white); XFillRectangle(dpy,reminder_win,g,0,0,R_W,R_H);
-    // Draw icon (from water.png or fallback bitmap)
+    // 绘制图标（从 water.png 或回退位图）
     if (app_img.pixels) {
         Image sm = scale_img(&app_img, 48, 48);
         XImage *xi = XCreateImage(dpy,DefaultVisual(dpy,scr),32,ZPixmap,0,
@@ -510,7 +510,7 @@ static void hide_reminder(void) {
     if (reminder_win!=None) { XDestroyWindow(dpy,reminder_win); reminder_win=None; }
 }
 
-// ====== Config ======
+// ====== 设置窗口 ======
 #define C_W 300
 #define C_H 210
 static void draw_config(void) {
@@ -549,7 +549,7 @@ static void config_save(void) {
     hide_config();
 }
 
-// ====== Event handlers ======
+// ====== 事件处理 ======
 static void h_reminder_click(int x, int y) {
     int bw=120,bh=34,bx=(R_W-bw)/2,by=R_H-bh-20;
     if (x>=bx&&x<=bx+bw&&y>=by&&y<=by+bh) hide_reminder();
@@ -598,12 +598,12 @@ static void handle_client(XClientMessageEvent *e) {
     }
 }
 
-// ====== Signal ======
+// ====== 信号处理 ======
 static void on_signal(int sig) {
     if (sig==SIGUSR1) sig_remind=1; else if (sig==SIGINT||sig==SIGTERM) quit_flag=1;
 }
 
-// ====== Cleanup ======
+// ====== 清理 ======
 static void cleanup(void) {
     if (app_img.pixels) { free(app_img.pixels); app_img.pixels=NULL; }
     if (menu_win!=None) XDestroyWindow(dpy,menu_win);
@@ -621,7 +621,7 @@ static void cleanup(void) {
     rm_pid(); if (dpy) XCloseDisplay(dpy);
 }
 
-// ====== Main ======
+// ====== 主函数 ======
 int main(int argc, char **argv) {
     if (argc==2 && strncmp(argv[1],"--set",5)==0) {
         init_paths(); load_config();
@@ -635,7 +635,7 @@ int main(int argc, char **argv) {
     if (!dpy) { fprintf(stderr,"Cannot open display\n"); return 1; }
     scr = DefaultScreen(dpy);
     init_colors(); init_fonts();
-    // Load app icon
+    // 加载应用图标
     app_img = load_png("water.png");
     if (!app_img.pixels) app_img = load_png("/usr/share/icons/hicolor/256x256/apps/drink-reminder.png");
     wm_delete_window=XInternAtom(dpy,"WM_DELETE_WINDOW",False);
