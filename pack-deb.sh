@@ -5,6 +5,8 @@ VER="1.0"
 ARCH="amd64"
 DIR="${NAME}_${VER}-1_${ARCH}"
 
+./build.sh
+
 rm -rf "$DIR"
 mkdir -p "$DIR/DEBIAN"
 mkdir -p "$DIR/usr/bin"
