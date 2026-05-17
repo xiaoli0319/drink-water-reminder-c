@@ -3,7 +3,7 @@ set -e
 NAME="drink-reminder"
 VER="1.0"
 ARCH="amd64"
-DIR="${NAME}_${VER}-1_${ARCH}"
+DIR="${NAME}_${VER}_${ARCH}"
 
 ./build.sh
 
@@ -39,11 +39,13 @@ cat > "$DIR/usr/share/applications/${NAME}.desktop" <<EOF
 [Desktop Entry]
 Name=Drink Reminder
 Comment=Reminds you to drink water
-Exec=/usr/bin/$NAME
+# 开机自启时延迟 10 秒再运行程序
+Exec=sh -c "sleep 10 && /usr/bin/$NAME"
 Icon=$NAME
 Terminal=false
 Type=Application
 Categories=Utility;
+X-GNOME-Autostart-Delay=10
 EOF
 
 cp drink-reminder "$DIR/usr/bin/$NAME"
