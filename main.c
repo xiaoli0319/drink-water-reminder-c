@@ -165,7 +165,7 @@ static int is_single_instance(void) {
 static void rm_pid(void) { unlink(pid_path); }
 static void setup_autostart(void) {
     FILE *f = fopen(autostart_path,"w"); if (!f) return;
-    fprintf(f,"[Desktop Entry]\nType=Application\nName=Drink Reminder\nComment=Periodic drink water reminder\nExec=/usr/bin/%s\nTerminal=false\nCategories=Utility;\nX-GNOME-Autostart-enabled=true\n",APP_NAME);
+    fprintf(f,"[Desktop Entry]\nType=Application\nName=Drink Reminder\nComment=Periodic drink water reminder\nExec=sh -c \"sleep 3 && /usr/bin/%s\"\nTerminal=false\nCategories=Utility;\nX-GNOME-Autostart-enabled=true\n",APP_NAME);
     fclose(f);
 }
 
