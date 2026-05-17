@@ -636,7 +636,7 @@ int main(int argc, char **argv) {
     scr = DefaultScreen(dpy);
     init_colors(); init_fonts();
     // 加载应用图标
-    app_img = load_png("water.png");
+    app_img = load_png("drink-reminder.png");
     if (!app_img.pixels) app_img = load_png("/usr/share/icons/hicolor/256x256/apps/drink-reminder.png");
     wm_delete_window=XInternAtom(dpy,"WM_DELETE_WINDOW",False);
     net_wm_state=XInternAtom(dpy,"_NET_WM_STATE",False);

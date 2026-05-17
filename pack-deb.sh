@@ -50,7 +50,7 @@ EOF
 
 cp drink-reminder "$DIR/usr/bin/$NAME"
 chmod 755 "$DIR/usr/bin/$NAME"
-cp water.png "$DIR/usr/share/icons/hicolor/256x256/apps/${NAME}.png"
+cp drink-reminder.png "$DIR/usr/share/icons/hicolor/256x256/apps/${NAME}.png"
 
 dpkg-deb --build --root-owner-group "$DIR"
 echo "Package built: ${DIR}.deb"
