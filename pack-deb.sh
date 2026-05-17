@@ -39,13 +39,13 @@ cat > "$DIR/usr/share/applications/${NAME}.desktop" <<EOF
 [Desktop Entry]
 Name=Drink Reminder
 Comment=Reminds you to drink water
-# 开机自启时延迟 10 秒再运行程序
-Exec=sh -c "sleep 10 && /usr/bin/$NAME"
+# 开机自启时延迟 1 秒再运行程序
+Exec=sh -c "sleep 1 && /usr/bin/$NAME"
 Icon=$NAME
 Terminal=false
 Type=Application
 Categories=Utility;
-X-GNOME-Autostart-Delay=10
+X-GNOME-Autostart-Delay=1
 EOF
 
 cp drink-reminder "$DIR/usr/bin/$NAME"
