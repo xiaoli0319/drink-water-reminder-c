@@ -434,10 +434,10 @@ static void tray_init_sni(void) {
 
 // ====== 右键菜单 ======
 #define M_W 140
-#define M_H 115
+#define M_H 150
 #define M_IH 35
-#define M_N 3
-static const char *m_lbl[M_N] = {"立即提醒","设置","退出"};
+#define M_N 4
+static const char *m_lbl[M_N] = {"立即提醒","设置","退出","取消"};
 
 static void draw_menu(void) {
     GC g=XCreateGC(dpy,menu_win,0,NULL);
