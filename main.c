@@ -258,6 +258,13 @@ static void append_icon_pixmap(DBusMessageIter *iter) {
             else    { pix[i+0]=0;    pix[i+1]=0;    pix[i+2]=0;    pix[i+3]=0;    }
         }
     }
+    // 转换 RGBA → ARGB32（小端序下为 BGRA 字节序）
+    for (int i=0; i<w*h; i++) {
+        unsigned char r=pix[i*4];
+        pix[i*4] = pix[i*4+2];  // B
+        pix[i*4+2] = r;         // R
+        // G(byte1) 和 A(byte3) 不变
+    }
     DBusMessageIter arr, st, ba;
     dbus_message_iter_open_container(iter, DBUS_TYPE_ARRAY, "(iiay)", &arr);
     dbus_message_iter_open_container(&arr, DBUS_TYPE_STRUCT, NULL, &st);
@@ -312,6 +319,11 @@ static int dbus_append_prop(DBusMessageIter *iter, const char *name) {
         dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "a(iiay)", &v);
         append_icon_pixmap(&v);
         dbus_message_iter_close_container(iter, &v);
+    } else if (!strcmp(name,"IconName")) {
+        const char *val="drink-reminder";
+        dbus_message_iter_open_container(iter, DBUS_TYPE_VARIANT, "s", &v);
+        dbus_message_iter_append_basic(&v, DBUS_TYPE_STRING, &val);
+        dbus_message_iter_close_container(iter, &v);
     } else return 0;
     return 1;
 }
@@ -336,7 +348,7 @@ static DBusHandlerResult tray_handler(DBusConnection *conn, DBusMessage *msg, vo
         DBusMessageIter it, d, e;
         dbus_message_iter_init_append(r,&it);
         dbus_message_iter_open_container(&it,DBUS_TYPE_ARRAY,"{sv}",&d);
-        const char *props[] = {"Category","Id","Title","Status","WindowId","ItemIsMenu","Menu","IconPixmap",NULL};
+        const char *props[] = {"Category","Id","Title","Status","WindowId","ItemIsMenu","Menu","IconPixmap","IconName",NULL};
         for (int i=0;props[i];i++) {
             dbus_message_iter_open_container(&d,DBUS_TYPE_DICT_ENTRY,NULL,&e);
             const char *k=props[i]; dbus_message_iter_append_basic(&e,DBUS_TYPE_STRING,&k);
